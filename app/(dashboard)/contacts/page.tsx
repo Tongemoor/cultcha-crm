@@ -28,7 +28,7 @@ export default async function ContactsPage({
 
   const { data: contacts } = await query.limit(100)
 
-  const types = ['contact', 'audience', 'tester', 'waiting_list', 'investor', 'advisor', 'supplier', 'team_member', 'press', 'partner']
+  const types = ['contact', 'audience', 'artist', 'venue', 'tester', 'waiting_list', 'investor', 'advisor', 'supplier', 'team_member', 'press', 'partner']
 
   return (
     <div className="space-y-5">

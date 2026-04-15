@@ -85,6 +85,8 @@ export default function NewContactPage() {
             <select value={form.type} onChange={e => set('type', e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
               <option value="contact">General Contact</option>
               <option value="audience">Audience Member</option>
+              <option value="artist">Artist</option>
+              <option value="venue">Venue Contact</option>
               <option value="tester">Tester</option>
               <option value="waiting_list">Waiting List</option>
               <option value="partner">Partner</option>

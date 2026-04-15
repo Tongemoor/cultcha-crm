@@ -20,6 +20,7 @@ export default function InboxPage() {
   const [selected, setSelected] = useState<Email | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState('')
   const [role, setRole] = useState<string>('')
   const [replyOpen, setReplyOpen] = useState(false)
   const [replyBody, setReplyBody] = useState('')
@@ -51,11 +52,19 @@ export default function InboxPage() {
 
   async function handleSync() {
     setSyncing(true)
+    setSyncMsg('')
     try {
       const res = await fetch('/api/email/sync', { headers: { Authorization: 'Bearer cultcha-cron-2024' } })
       const result = await res.json()
-      if (result.success) await loadEmails()
-    } catch {}
+      if (result.success) {
+        await loadEmails()
+        setSyncMsg(result.synced > 0 ? `✓ ${result.synced} new email${result.synced !== 1 ? 's' : ''} synced` : '✓ Up to date — no new emails')
+      } else {
+        setSyncMsg(`⚠ Sync error: ${result.error || 'Unknown error'}`)
+      }
+    } catch (e) {
+      setSyncMsg('⚠ Could not reach sync service')
+    }
     setSyncing(false)
   }
 
@@ -134,6 +143,7 @@ export default function InboxPage() {
               {syncing ? 'Syncing…' : 'Sync'}
             </button>
           </div>
+          {syncMsg && <p className={`text-xs mt-1 ${syncMsg.startsWith('⚠') ? 'text-red-500' : 'text-green-600'}`}>{syncMsg}</p>}
           <div className="flex gap-1">
             {(['all', 'unread', 'replied'] as const).map(f => (
               <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filter === f ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:bg-gray-100'}`}>
