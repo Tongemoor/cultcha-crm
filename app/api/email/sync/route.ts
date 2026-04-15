@@ -42,13 +42,14 @@ export async function GET(request: Request) {
         bodyStructure: true,
         source: true,
       })) {
-        const messageId = message.envelope.messageId || `uid-${message.uid}`
-        const from = message.envelope.from?.[0]
+        const envelope = message.envelope ?? {}
+        const messageId = envelope.messageId || `uid-${message.uid}`
+        const from = envelope.from?.[0]
         const fromEmail = from?.address || ''
         const fromName = from?.name || from?.address || ''
-        const subject = message.envelope.subject || '(no subject)'
-        const receivedAt = message.envelope.date || new Date()
-        const threadId = message.envelope.inReplyTo || messageId
+        const subject = envelope.subject || '(no subject)'
+        const receivedAt = envelope.date || new Date()
+        const threadId = envelope.inReplyTo || messageId
 
         // Get body text from source
         let bodyText = ''
