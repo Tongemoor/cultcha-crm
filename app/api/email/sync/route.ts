@@ -27,37 +27,43 @@ export async function GET(request: Request) {
       pass: process.env.ICLOUD_APP_PASSWORD!,
     },
     logger: false,
+    tls: { rejectUnauthorized: false },
   })
 
+  // Step-by-step so we can see exactly which stage fails
+  let step = 'connect'
   try {
     await client.connect()
+    step = 'lock'
     const lock = await client.getMailboxLock('INBOX')
+    step = 'fetch'
     let synced = 0
     let total = 0
 
     try {
-      // Message count is available directly from the selected mailbox
-      total = (client.mailbox as { exists?: number })?.exists || 0
+      // Read total from the mailbox object (set after SELECT)
+      const mb = client.mailbox as { exists?: number } | null
+      total = mb?.exists ?? 0
 
       if (total > 0) {
         const start = Math.max(1, total - 49)
-        const range = `${start}:${total}`
+        const range = `${start}:*`
 
         for await (const message of client.fetch(range, {
           uid: true,
           envelope: true,
           source: true,
         })) {
+          step = 'parse'
           const envelope = message.envelope ?? {}
           const messageId = envelope.messageId || `uid-${message.uid}`
           const from = envelope.from?.[0]
-          const fromEmail = from?.address || ''
-          const fromName = from?.name || from?.address || ''
+          const fromEmail = from?.address || 'unknown@unknown.com'
+          const fromName = from?.name || from?.address || 'Unknown'
           const subject = envelope.subject || '(no subject)'
           const receivedAt = envelope.date || new Date()
           const threadId = envelope.inReplyTo || messageId
 
-          // Extract body text from raw source
           let bodyText = ''
           try {
             const source = message.source?.toString('utf8') || ''
@@ -67,6 +73,7 @@ export async function GET(request: Request) {
             }
           } catch {}
 
+          step = 'upsert'
           const { error } = await supabase.from('emails').upsert({
             message_id: messageId,
             uid: message.uid,
@@ -92,8 +99,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: true, synced, total })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    const stack = err instanceof Error ? err.stack?.split('\n')[1]?.trim() : ''
     try { await client.logout() } catch {}
-    return NextResponse.json({ success: false, error: message, detail: stack }, { status: 500 })
+    return NextResponse.json({ success: false, error: `${step}: ${message}` }, { status: 500 })
   }
 }
