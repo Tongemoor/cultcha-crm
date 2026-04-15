@@ -53,7 +53,7 @@ export async function GET(request: Request) {
 
         // Get body text from source
         let bodyText = ''
-        let bodyHtml = ''
+        const bodyHtml = ''
         try {
           const source = message.source?.toString('utf8') || ''
           // Simple extraction — split headers from body

@@ -84,13 +84,14 @@ export default function NewContactPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Contact Type</label>
             <select value={form.type} onChange={e => set('type', e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
               <option value="contact">General Contact</option>
+              <option value="audience">Audience Member</option>
+              <option value="tester">Tester</option>
+              <option value="waiting_list">Waiting List</option>
               <option value="partner">Partner</option>
               <option value="press">Press / Media</option>
               <option value="investor">Investor</option>
               <option value="advisor">Advisor</option>
               <option value="supplier">Supplier</option>
-              <option value="tester">Tester</option>
-              <option value="waiting_list">Waiting List</option>
               <option value="organisation">Organisation</option>
             </select>
           </div>
