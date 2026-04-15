@@ -36,9 +36,8 @@ export async function GET(request: Request) {
     let total = 0
 
     try {
-      // Get total message count, then fetch most recent 50
-      const status = await client.status('INBOX', { messages: true })
-      total = status.messages || 0
+      // Message count is available directly from the selected mailbox
+      total = (client.mailbox as { exists?: number })?.exists || 0
 
       if (total > 0) {
         const start = Math.max(1, total - 49)
