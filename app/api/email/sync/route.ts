@@ -27,7 +27,12 @@ export async function GET(request: Request) {
     },
     logger: false,
     disableAutoIdle: true,
-    tls: { rejectUnauthorized: false },
+    tls: {
+      rejectUnauthorized: false,
+      servername: 'imap.mail.me.com',
+    },
+    socketTimeout: 20000,
+    greetingTimeout: 10000,
   })
 
   let step = 'connect'
