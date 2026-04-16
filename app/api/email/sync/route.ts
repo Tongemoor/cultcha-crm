@@ -5,7 +5,6 @@ import { ImapFlow } from 'imapflow'
 export const maxDuration = 30
 
 export async function GET(request: Request) {
-  // Protect cron endpoint
   const authHeader = request.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
   if (authHeader !== `Bearer ${cronSecret}`) {
@@ -27,25 +26,25 @@ export async function GET(request: Request) {
       pass: process.env.ICLOUD_APP_PASSWORD!,
     },
     logger: false,
+    disableAutoIdle: true,
     tls: { rejectUnauthorized: false },
   })
 
-  // Step-by-step so we can see exactly which stage fails
   let step = 'connect'
   try {
     await client.connect()
     step = 'lock'
     const lock = await client.getMailboxLock('INBOX')
-    step = 'fetch'
+    step = 'count'
     let synced = 0
     let total = 0
 
     try {
-      // Read total from the mailbox object (set after SELECT)
       const mb = client.mailbox as { exists?: number } | null
       total = mb?.exists ?? 0
 
       if (total > 0) {
+        step = 'fetch'
         const start = Math.max(1, total - 49)
         const range = `${start}:*`
 
@@ -54,7 +53,6 @@ export async function GET(request: Request) {
           envelope: true,
           source: true,
         })) {
-          step = 'parse'
           const envelope = message.envelope ?? {}
           const messageId = envelope.messageId || `uid-${message.uid}`
           const from = envelope.from?.[0]
@@ -99,7 +97,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: true, synced, total })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
+    const code = (err as { code?: string })?.code || ''
     try { await client.logout() } catch {}
-    return NextResponse.json({ success: false, error: `${step}: ${message}` }, { status: 500 })
+    return NextResponse.json({ success: false, error: `${step}: ${message}${code ? ' (' + code + ')' : ''}` }, { status: 500 })
   }
 }
