@@ -1,21 +1,37 @@
-import { createClient } from '@supabase/supabase-js'
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { ImapFlow } from 'imapflow'
+import { simpleParser } from 'mailparser'
+import { createClient } from '@supabase/supabase-js'
 
 export const maxDuration = 30
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
   if (authHeader !== `Bearer ${cronSecret}`) {
+    if (authHeader && authHeader !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
+  }
+  return syncEmails()
+}
+
+export async function POST(request: NextRequest) {
+  const cronSecret = request.headers.get('x-cron-secret')
+  if (cronSecret && cronSecret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
+  return syncEmails()
+}
 
+async function syncEmails() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   )
+
+  let step = 'connect'
 
   const client = new ImapFlow({
     host: 'imap.mail.me.com',
@@ -35,75 +51,91 @@ export async function GET(request: Request) {
     greetingTimeout: 10000,
   })
 
-  let step = 'connect'
   try {
     await client.connect()
     step = 'lock'
+
     const lock = await client.getMailboxLock('INBOX')
-    step = 'count'
     let synced = 0
-    let total = 0
 
     try {
-      const mb = client.mailbox as { exists?: number } | null
-      total = mb?.exists ?? 0
+      step = 'count'
+      const total: number = (client.mailbox as { exists: number }).exists ?? 0
 
-      if (total > 0) {
-        step = 'fetch'
-        const start = Math.max(1, total - 49)
-        const range = `${start}:*`
-
-        for await (const message of client.fetch(range, {
-          uid: true,
-          envelope: true,
-          source: true,
-        })) {
-          const envelope = message.envelope ?? {}
-          const messageId = envelope.messageId || `uid-${message.uid}`
-          const from = envelope.from?.[0]
-          const fromEmail = from?.address || 'unknown@unknown.com'
-          const fromName = from?.name || from?.address || 'Unknown'
-          const subject = envelope.subject || '(no subject)'
-          const receivedAt = envelope.date || new Date()
-          const threadId = envelope.inReplyTo || messageId
-
-          let bodyText = ''
-          try {
-            const source = message.source?.toString('utf8') || ''
-            const parts = source.split('\r\n\r\n')
-            if (parts.length > 1) {
-              bodyText = parts.slice(1).join('\r\n\r\n').substring(0, 5000)
-            }
-          } catch {}
-
-          step = 'upsert'
-          const { error } = await supabase.from('emails').upsert({
-            message_id: messageId,
-            uid: message.uid,
-            from_email: fromEmail,
-            from_name: fromName,
-            to_email: process.env.ICLOUD_EMAIL,
-            subject,
-            body_text: bodyText,
-            body_html: '',
-            received_at: receivedAt.toISOString(),
-            thread_id: threadId,
-            folder: 'INBOX',
-          }, { onConflict: 'message_id', ignoreDuplicates: true })
-
-          if (!error) synced++
-        }
+      if (total === 0) {
+        return NextResponse.json({ synced: 0, total: 0 })
       }
+
+      const start = Math.max(1, total - 49)
+      step = 'fetch'
+
+      for await (const msg of client.fetch(`${start}:*`, { source: true, envelope: true })) {
+        step = 'parse'
+
+        let subject = 'No subject'
+        let fromName: string | null = null
+        let fromEmail: string | null = null
+        let bodyToStore: string | null = null
+        let receivedAt: Date = new Date()
+
+        try {
+          const parsed = await simpleParser(msg.source)
+
+          subject = parsed.subject || 'No subject'
+          fromEmail = parsed.from?.value?.[0]?.address ?? null
+          fromName = parsed.from?.value?.[0]?.name ?? null
+          receivedAt = parsed.date ?? new Date()
+
+          if (parsed.text && parsed.text.trim().length > 0) {
+            bodyToStore = parsed.text.trim()
+          } else if (parsed.html) {
+            bodyToStore = parsed.html
+              .replace(/<script[\s\S]*?<\/script>/gi, '')
+              .replace(/<style[\s\S]*?<\/style>/gi, '')
+              .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
+              .replace(/&zwnj;/gi, '')
+              .trim()
+          }
+        } catch {
+          subject = msg.envelope?.subject || 'No subject'
+          fromEmail = msg.envelope?.from?.[0]?.address ?? null
+          fromName = msg.envelope?.from?.[0]?.name ?? null
+          receivedAt = msg.envelope?.date ?? new Date()
+        }
+
+        step = 'upsert'
+
+        const uid = msg.uid
+        const stableId = `00000000-0000-0000-${String(uid).padStart(4, '0').slice(-4)}-${String(uid).padStart(12, '0').slice(-12)}`
+
+        const { error } = await supabase.from('inbox_items').upsert(
+          {
+            id: stableId,
+            subject,
+            body: bodyToStore,
+            from_name: fromName,
+            from_email: fromEmail,
+            type: 'email',
+            status: 'new',
+            priority: 'medium',
+            received_at: receivedAt.toISOString(),
+          },
+          { onConflict: 'id', ignoreDuplicates: true }
+        )
+
+        if (!error) synced++
+      }
+
     } finally {
       lock.release()
     }
 
     await client.logout()
-    return NextResponse.json({ success: true, synced, total })
+    return NextResponse.json({ synced, total: synced })
+
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    const code = (err as { code?: string })?.code || ''
-    try { await client.logout() } catch {}
-    return NextResponse.json({ success: false, error: `${step}: ${message}${code ? ' (' + code + ')' : ''}` }, { status: 500 })
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`Email sync error at step [${step}]:`, msg)
+    return NextResponse.json({ error: `${step}: ${msg}` }, { status: 500 })
   }
 }
